@@ -35,7 +35,10 @@ class TaskSetGenerator:
                 arrival = random.randint(0, 10)
                 exec_time = random.randint(1, 5)
                 period = random.randint(max(5, exec_time+1), 25)
-                deadline = random.randint(exec_time + 1, period)
+                
+                # deadline = random.randint(exec_time + 1, period)
+                deadline = exec_time + 1
+                
                 preemptive, priority, dep = self._add_optional_fields(self.all_task_names[:-1])
                 t = PeriodicTask(name, arrival, exec_time, period, deadline, preemptive, priority, dep)
                 tasks.append(t)
@@ -49,9 +52,15 @@ class TaskSetGenerator:
         for i in range(1, n+1):
             name = f"s{i}"
             self.all_task_names.append(name)
-            arrival = random.randint(0, 50)
+            # arrival = random.randint(0, 50)
+            arrival = 5
+            
             exec_time = random.randint(1, 5)
-            deadline = random.randint(exec_time + 5, 20)
+            # deadline = random.randint(exec_time + 5, 20)
+            
+            # 極端情況
+            deadline = exec_time + 1
+            
             interval = random.randint(5, 12)
             preemptive, priority, dep = self._add_optional_fields(self.all_task_names[:-1])
             t = SporadicTask(name, arrival, exec_time, deadline, interval, preemptive, priority, dep)

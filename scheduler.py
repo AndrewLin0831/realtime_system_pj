@@ -1,5 +1,5 @@
 # schedulers.py
-from task import PeriodicTask, Job
+from task import *
 import statistics
 
 class BaseScheduler:
@@ -55,26 +55,43 @@ class BaseScheduler:
         miss_count = sum(1 for j in completed_jobs if j.is_missed)
         dropped_count = len(dropped_jobs)
 
-        # 2. 分類 Hard (Periodic) vs Soft (Others)
-        # 假設 Periodic Task 為 Hard Real-time
-        hard_jobs = [j for j in all_released_jobs if isinstance(j.task, PeriodicTask)]
-        soft_jobs = [j for j in all_released_jobs if not isinstance(j.task, PeriodicTask)]
-        
+        # 2. 分類 Hard (Periodic + Sporadic) vs Soft (Aperiodic)
+        soft_jobs = [j for j in all_released_jobs if isinstance(j.task, AperiodicTask)]
+        hard_jobs = [j for j in all_released_jobs if not isinstance(j.task, AperiodicTask)]
+
         total_hard = len(hard_jobs)
         total_soft = len(soft_jobs)
 
-        # Hard Miss = Completed but Late + Dropped
-        hard_missed_completed = sum(1 for j in completed_jobs if j.is_missed and isinstance(j.task, PeriodicTask))
-        hard_dropped = sum(1 for j in dropped_jobs if isinstance(j.task, PeriodicTask))
+        # Hard Miss = completed but late + dropped
+        hard_missed_completed = sum(
+            1 for j in completed_jobs 
+            if j.is_missed and isinstance(j.task, (PeriodicTask, SporadicTask))
+        )
+
+        hard_dropped = sum(
+            1 for j in dropped_jobs
+            if isinstance(j.task, (PeriodicTask, SporadicTask))
+        )
+
         total_hard_miss = hard_missed_completed + hard_dropped
-        
-        # Soft Miss
-        soft_missed_completed = sum(1 for j in completed_jobs if j.is_missed and not isinstance(j.task, PeriodicTask))
-        soft_dropped = sum(1 for j in dropped_jobs if not isinstance(j.task, PeriodicTask))
+
+        # Soft Miss (Aperiodic Only)
+        soft_missed_completed = sum(
+            1 for j in completed_jobs
+            if j.is_missed and isinstance(j.task, AperiodicTask)
+        )
+
+        soft_dropped = sum(
+            1 for j in dropped_jobs
+            if isinstance(j.task, AperiodicTask)
+        )
+
         total_soft_miss = soft_missed_completed + soft_dropped
 
+        # Miss Rates
         hard_miss_rate = (total_hard_miss / total_hard) if total_hard > 0 else 0.0
         soft_miss_rate = (total_soft_miss / total_soft) if total_soft > 0 else 0.0
+
 
         # 3. Response Time & Jitter
         response_times = [j.finish_time - j.release_time for j in completed_jobs]

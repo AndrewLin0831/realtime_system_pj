@@ -53,7 +53,7 @@ def _print_compact_dict_of_lists(varname, d):
 
 def main():
     gen = TaskSetGenerator(use_dependency=True, use_preemption=True, use_priority=True, max_periodic_util=0.75)
-    tasks = gen.generate_task_set(np=4, ns=2, na=2)
+    tasks = gen.generate_task_set(np=20, ns=30, na=6)
 
     basic_task_set = tasks_to_basic_dict(tasks)
     advanced_task_set = tasks_to_advanced_dict(tasks)
@@ -80,10 +80,12 @@ def main():
         print(f"{key} Metrics: {json.dumps(res['metrics'], separators=(',',':'), ensure_ascii=False)}")
 
     # 顯示 basic / advanced task set（漂亮縮排）
+    '''
     print("\nbasic_task_set =")
     print(json.dumps(basic_task_set, indent=4, ensure_ascii=False))
     print("\nadvanced_task_set =")
     print(json.dumps(advanced_task_set, indent=4, ensure_ascii=False))
+    '''
 
     # 顯示 scheduled_*（keys 每行，lists 單行）
     print("\nGenerated Scheduled Basic Tasks :\n")
