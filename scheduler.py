@@ -142,11 +142,6 @@ class BaseScheduler:
             new_jobs = self._release_jobs(t, tasks, released_flags)
             ready_queue.extend(new_jobs)
             hard_new_arrived = any(getattr(j.task, "is_hard", False) for j in new_jobs)
-
-            # 若剛有硬即時工作到達，強制中斷當前非-hard 工作（不論 scheduler.preemptive）
-            if hard_new_arrived and current_job and not getattr(current_job.task, "is_hard", False) and not current_job.is_completed:
-                ready_queue.append(current_job)
-                current_job = None
                 
             # 2. 處理 Preemption (搶佔)
             needs_reschedule = (
