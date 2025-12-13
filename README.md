@@ -2,7 +2,7 @@
 
 This project implements an object-oriented Task Model Generator for real-time
 systems, supporting periodic, sporadic, and aperiodic tasks. It is modular and
-supports optional task attributes such as preemption, priority, and dependency.
+supports optional task attributes such as preemptive, priority, and dependencies.
 
 ---
 
@@ -33,21 +33,27 @@ The generator produces task sets containing:
 ### ✔ Optional Advanced Attributes
 Each attribute can be individually enabled or disabled:
 
-| Attribute   | Description                        | Default |
-|------------|------------------------------------|---------|
-| preemption | Whether the task is preemptive     | False   |
-| priority   | Task priority (lower = higher prio)| False   |
-| dependency | List of tasks this task depends on | False   |
+| Attribute    | Description                        | Default |
+|--------------|------------------------------------|---------|
+| preemptive   | Whether the task is preemptive     | False   |
+| priority     | Task priority (lower = higher prio)| 0       |
+| dependencies | List of tasks this task depends on | []      |
 
 Enable them when creating the generator:
 
 ```python
+from task_generator import TaskSetGenerator
+
 gen = TaskSetGenerator(
     use_preemption=True,
     use_priority=True,
     use_dependency=True
 )
 ```
+
+Notes:
+- The generator flags are `use_preemption`, `use_priority`, `use_dependency` as defined in [task_generator.py](c:\Users\s6100\Desktop\realtime_system_hw\Real-time-system-Proj-main\task_generator.py).
+- Task objects use attributes `preemptive`, `priority`, and `dependencies` as defined in [task.py](c:\Users\s6100\Desktop\realtime_system_hw\Real-time-system-Proj-main\task.py).
 
 ---
 
@@ -71,6 +77,14 @@ task_set = gen.generate_task_set(
 ---
 
 ## Output Format (Example)
+Keys emitted by the project (see [main.py](c:\Users\s6100\Desktop\realtime_system_hw\Real-time-system-Proj-main\main.py)):
+
+- execution_time — corresponds to Task.exec_time
+- preemptive — corresponds to Task.preemptive
+- dependencies — list from Task.dependencies
+- sporadic min_interval — output key is "min_interval" but the SporadicTask property is named `interval` internally
+
+Example:
 ```json
 {
     "periodic": {
@@ -81,7 +95,7 @@ task_set = gen.generate_task_set(
             "deadline": 10,
             "preemptive": true,
             "priority": 4,
-            "dependency": []
+            "dependencies": []
         }
     },
     "aperiodic": {
@@ -101,6 +115,7 @@ task_set = gen.generate_task_set(
     }
 }
 ```
+
 Pretty printing:
 ```python
 import json
