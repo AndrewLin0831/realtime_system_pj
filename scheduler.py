@@ -143,10 +143,7 @@ class BaseScheduler:
             ready_queue.extend(new_jobs)
             hard_new_arrived = any(getattr(j.task, "is_hard", False) for j in new_jobs)
 
-            # 若剛有硬即時工作到達，強制中斷當前非-hard 工作（不論 scheduler.preemptive）
-            if hard_new_arrived and current_job and not getattr(current_job.task, "is_hard", False) and not current_job.is_completed:
-                ready_queue.append(current_job)
-                current_job = None
+
                 
             # 2. 處理 Preemption (搶佔)
             needs_reschedule = (
@@ -300,7 +297,298 @@ class MyAlgoScheduler(BaseScheduler):
         super().__init__()
         self.name = "myAlgo"
         self.preemptive = True
+# schedulers.py
+from task import PeriodicTask, Job
+import math
+import statistics
 
+class BaseScheduler:
+    def __init__(self):
+        self.name = "Base"
+        self.preemptive = False
+
+    def _release_jobs(self, time, tasks, released_flags):
+        """釋放到達的任務成為 Job"""
+        new_jobs = []
+        for task in tasks:
+            should_release = False
+            if isinstance(task, PeriodicTask):
+                if time >= task.arrival_time and (time - task.arrival_time) % task.period == 0:
+                    should_release = True
+            else:
+                if not released_flags.get(task.name, False) and time == task.arrival_time:
+                    should_release = True
+                    released_flags[task.name] = True
+            
+            if should_release:
+                abs_deadline = time + task.deadline
+                new_jobs.append(Job(task, time, abs_deadline))
+        return new_jobs
+
+    def _eligible(self, job, completed_jobs):
+        """檢查依賴性"""
+        deps = getattr(job.task, "dependencies", []) or getattr(job.task, "dependency", []) or []
+        if not deps:
+            return True
+        completed_names = {j.task.name for j in completed_jobs}
+        return all(d in completed_names for d in deps)
+
+    def pick_job(self, queue, current_time):
+        raise NotImplementedError("必須在子類別實作此方法")
+
+    def evaluate(self, completed_jobs, total_released_count, sim_time, all_released_jobs):
+        """計算詳細效能指標"""
+        
+        # 1. 基礎數據
+        completed_set = set(j.name for j in completed_jobs)
+        dropped_jobs = [j for j in all_released_jobs if j.name not in completed_set]
+        
+        dropped_count = len(dropped_jobs)
+
+        # 2. Hard (Periodic) vs Soft (Others)
+        hard_jobs = [j for j in all_released_jobs if isinstance(j.task, PeriodicTask)]
+        soft_jobs = [j for j in all_released_jobs if not isinstance(j.task, PeriodicTask)]
+        
+        total_hard = len(hard_jobs)
+        total_soft = len(soft_jobs)
+
+        hard_missed_completed = sum(1 for j in completed_jobs if j.is_missed and isinstance(j.task, PeriodicTask))
+        hard_dropped = sum(1 for j in dropped_jobs if isinstance(j.task, PeriodicTask))
+        total_hard_miss = hard_missed_completed + hard_dropped
+        
+        soft_missed_completed = sum(1 for j in completed_jobs if j.is_missed and not isinstance(j.task, PeriodicTask))
+        soft_dropped = sum(1 for j in dropped_jobs if not isinstance(j.task, PeriodicTask))
+        total_soft_miss = soft_missed_completed + soft_dropped
+
+        hard_miss_rate = (total_hard_miss / total_hard) if total_hard > 0 else 0.0
+        soft_miss_rate = (total_soft_miss / total_soft) if total_soft > 0 else 0.0
+
+        # 3. Response Time & Jitter
+        response_times = [j.finish_time - j.release_time for j in completed_jobs]
+        avg_resp = statistics.mean(response_times) if response_times else 0
+        max_resp = max(response_times) if response_times else 0
+        overall_jitter = statistics.pstdev(response_times) if len(response_times) > 1 else 0
+
+        # 4. CPU Util & Fairness
+        total_busy = sum(j.task.exec_time for j in completed_jobs)
+        cpu_util = (total_busy / sim_time) if sim_time else 0
+        
+        task_cpu_map = {}
+        for j in completed_jobs:
+            task_cpu_map[j.task.name] = task_cpu_map.get(j.task.name, 0) + j.task.exec_time
+        
+        fairness = 0
+        if task_cpu_map:
+            cpu_values = list(task_cpu_map.values())
+            mean_val = statistics.mean(cpu_values)
+            if mean_val > 0:
+                fairness = 1.0 - (statistics.pstdev(cpu_values) / mean_val)
+
+        # 5. Dependency Deadlock Rate (修正邏輯)
+        # 計算方式：如果有被丟棄的工作是因為「依賴未滿足」而導致的，視為潛在的 Deadlock 損失
+        # 這裡簡單計算：Dropped Job 中，依賴列表不為空的比例
+        dep_dropped_count = 0
+        for j in dropped_jobs:
+            deps = getattr(j.task, "dependencies", []) or []
+            if deps: 
+                dep_dropped_count += 1
+        
+        dep_deadlock_rate = (dep_dropped_count / total_released_count) if total_released_count else 0.0
+
+        # 6. Priority Starvation (修正邏輯)
+        # 定義：如果存在低優先權任務完全沒執行，但高優先權任務執行了很多
+        starvation_score = 0.0
+        priorities = [getattr(j.task, 'priority', 99) for j in all_released_jobs]
+        if priorities and completed_jobs:
+            min_p = min(priorities) # 最高優先權 (數值最小)
+            # 找出那些優先權較低 (數值 > min_p) 的任務
+            low_p_tasks = {j.task.name for j in all_released_jobs if getattr(j.task, 'priority', 99) > min_p}
+            
+            if low_p_tasks:
+                completed_task_names = {j.task.name for j in completed_jobs}
+                # 檢查是否有低優先權任務完全沒出現在完成名單中
+                starved_tasks = low_p_tasks - completed_task_names
+                if starved_tasks:
+                    starvation_score = len(starved_tasks) / len(low_p_tasks) # 飢餓比例
+
+        return {
+            "Algorithm": self.name,
+            "Drop Rate": f"{(dropped_count/total_released_count):.2%}" if total_released_count else "0%",
+            "Hard Miss Rate": f"{hard_miss_rate:.2%}",
+            "Soft Miss Rate": f"{soft_miss_rate:.2%}",
+            "Avg Resp Time": f"{avg_resp:.2f}",
+            "Max Resp Time": max_resp,
+            "Overall Jitter": f"{overall_jitter:.3f}",
+            "CPU Util": f"{cpu_util:.2%}",
+            "Completed": len(completed_jobs),
+            "Dropped": dropped_count,
+            "Fairness": f"{fairness:.3f}",
+            "Dependency Deadlock": f"{dep_deadlock_rate:.3f}",
+            "Priority-Starvation": f"{starvation_score:.3f}"
+        }
+
+    def run(self, tasks, sim_time=100):
+        current_time = 0
+        ready_queue = []
+        completed_jobs = []
+        all_released_jobs = [] 
+        
+        current_job = None
+        timeline = []
+        released_flags = {}
+
+        for t in range(sim_time):
+            current_time = t
+
+            # 1. 釋放新工作
+            new_jobs = self._release_jobs(t, tasks, released_flags)
+            ready_queue.extend(new_jobs)
+            all_released_jobs.extend(new_jobs)
+            
+            # [修正] 移除多餘的 hard_new_arrived 計算
+
+            # 2. 處理 Preemption (搶佔)
+            needs_reschedule = (
+                self.preemptive or 
+                current_job is None or 
+                current_job.is_completed
+            )
+
+            if needs_reschedule:
+                if current_job and not current_job.is_completed:
+                    ready_queue.append(current_job)
+                    current_job = None
+                
+                # 3. 篩選依賴滿足的 Jobs
+                eligible_jobs = [j for j in ready_queue if self._eligible(j, completed_jobs)]
+                
+                if eligible_jobs:
+                    picked = self.pick_job(eligible_jobs, current_time)
+                    if picked:
+                        current_job = picked
+                        if current_job in ready_queue:
+                            ready_queue.remove(current_job)
+
+            # 5. 執行
+            if current_job:
+                if current_job.start_time == -1:
+                    current_job.start_time = t
+                current_job.remaining_time -= 1
+                timeline.append((t, current_job.name))
+
+                if current_job.remaining_time <= 0:
+                    current_job.finish_time = t + 1
+                    current_job.is_completed = True
+                    if current_job.finish_time > current_job.absolute_deadline:
+                        current_job.is_missed = True
+                    
+                    completed_jobs.append(current_job)
+                    current_job = None
+            else:
+                timeline.append((t, "IDLE"))
+
+        metrics = self.evaluate(completed_jobs, len(all_released_jobs), sim_time, all_released_jobs)
+        return {
+            "timeline": timeline,
+            "metrics": metrics
+        }
+
+
+# ==========================================
+# 各種具體的演算法實作
+# ==========================================
+
+class FIFOScheduler(BaseScheduler):
+    def __init__(self):
+        super().__init__()
+        self.name = "FIFO"
+        self.preemptive = False 
+
+    def pick_job(self, queue, current_time):
+        if not queue: return None
+        return sorted(queue, key=lambda j: j.release_time)[0]
+
+
+class EDFScheduler(BaseScheduler):
+    def __init__(self):
+        super().__init__()
+        self.name = "EDF"
+        self.preemptive = True 
+
+    def pick_job(self, queue, current_time):
+        if not queue: return None
+        return sorted(queue, key=lambda j: j.absolute_deadline)[0]
+
+
+class RMScheduler(BaseScheduler):
+    def __init__(self):
+        super().__init__()
+        self.name = "RM"
+        self.preemptive = True
+
+    def pick_job(self, queue, current_time):
+        if not queue: return None
+        def get_period(job):
+            if isinstance(job.task, PeriodicTask):
+                return job.task.period
+            return 9999999 
+        return sorted(queue, key=get_period)[0]
+
+
+class LLFScheduler(BaseScheduler):
+    def __init__(self):
+        super().__init__()
+        self.name = "LLF"
+        self.preemptive = True
+
+    def pick_job(self, queue, current_time):
+        if not queue: return None
+        return sorted(queue, key=lambda j: (j.absolute_deadline - current_time) - j.remaining_time)[0]
+
+
+class DMScheduler(BaseScheduler):
+    def __init__(self):
+        super().__init__()
+        self.name = "DM"
+        self.preemptive = True
+
+    def pick_job(self, queue, current_time):
+        if not queue: return None
+        return sorted(queue, key=lambda j: j.task.deadline)[0]
+
+
+class PriorityInheritanceScheduler(BaseScheduler):
+    def __init__(self):
+        super().__init__()
+        self.name = "PriorityInheritance"
+        self.preemptive = True
+
+    def pick_job(self, queue, current_time):
+        if not queue: return None
+        return sorted(queue, key=lambda j: getattr(j.task, 'priority', 9999))[0]
+
+
+class SJFScheduler(BaseScheduler):
+    def __init__(self):
+        super().__init__()
+        self.name = "SJF"
+        self.preemptive = True
+
+    def pick_job(self, queue, current_time):
+        if not queue: return None
+        return sorted(queue, key=lambda j: j.remaining_time)[0]
+
+
+class MyAlgoScheduler(BaseScheduler):
+    def __init__(self):
+        super().__init__()
+        self.name = "myAlgo"
+        self.preemptive = True
+
+    def pick_job(self, queue, current_time):
+        # 結合 Deadline 和 SJF：先比 Deadline，若一樣再比剩餘時間
+        if not queue: return None
+        return sorted(queue, key=lambda j: (j.absolute_deadline, j.remaining_time))[0]
     def pick_job(self, queue, current_time):
         # primary: earliest absolute deadline, tie-break: smallest remaining time
         if not queue: return None
