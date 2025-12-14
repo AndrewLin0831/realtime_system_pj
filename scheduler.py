@@ -60,89 +60,77 @@ class BaseScheduler:
         raise NotImplementedError
 
     def evaluate(self, completed_jobs, total_released_count, sim_time, all_released_jobs):
-        """計算詳細效能指標"""
-        
-        # 1. 基礎計數
-        completed_set = set(j.name for j in completed_jobs)
-        dropped_jobs = [j for j in all_released_jobs if j.name not in completed_set]
-        
-        miss_count = sum(1 for j in completed_jobs if j.is_missed)
-        dropped_count = len(dropped_jobs)
+        """計算詳細效能指標（Hard miss 僅依 is_missed 判斷）"""
 
-        # 2. 分類 Hard (Periodic + Sporadic) vs Soft (Aperiodic)
-        soft_jobs = [j for j in all_released_jobs if isinstance(j.task, AperiodicTask)]
-        hard_jobs = [j for j in all_released_jobs if not isinstance(j.task, AperiodicTask)]
+        # -------------------------------------------------
+        # 1. 基礎集合
+        # -------------------------------------------------
+        completed_set = set(j for j in completed_jobs)
 
-        total_hard = len(hard_jobs)
-        total_soft = len(soft_jobs)
+        # 注意：dropped 只是「未完成」，不是 miss
+        dropped_jobs = [
+            j for j in all_released_jobs
+            if j not in completed_set
+        ]
 
-        # Hard Miss = completed but late + dropped
-        hard_missed_completed = sum(
-            1 for j in completed_jobs 
-            if j.is_missed and isinstance(j.task, (PeriodicTask, SporadicTask))
-        )
+        # -------------------------------------------------
+        # 2. Hard / Soft 分類
+        # -------------------------------------------------
+        hard_jobs = [j for j in all_released_jobs if j.task.is_hard]
+        soft_jobs = [j for j in all_released_jobs if not j.task.is_hard]
 
-        hard_dropped = sum(
-            1 for j in dropped_jobs
-            if isinstance(j.task, (PeriodicTask, SporadicTask))
-        )
+        # -------------------------------------------------
+        # 3. Hard Miss（唯一正確來源：j.is_missed）
+        # -------------------------------------------------
+        hard_miss = sum(1 for j in hard_jobs if j.is_missed)
+        hard_miss_rate = hard_miss / len(hard_jobs) if hard_jobs else 0.0
 
-        total_hard_miss = hard_missed_completed + hard_dropped
+        # -------------------------------------------------
+        # 4. Soft Miss（允許 miss，但仍統計）
+        # -------------------------------------------------
+        soft_miss = sum(1 for j in soft_jobs if j.is_missed)
+        soft_miss_rate = soft_miss / len(soft_jobs) if soft_jobs else 0.0
 
-        # Soft Miss (Aperiodic Only)
-        soft_missed_completed = sum(
-            1 for j in completed_jobs
-            if j.is_missed and isinstance(j.task, AperiodicTask)
-        )
+        # -------------------------------------------------
+        # 5. Response Time & Jitter（僅完成的）
+        # -------------------------------------------------
+        response_times = [
+            j.finish_time - j.release_time
+            for j in completed_jobs
+            if j.finish_time is not None
+        ]
 
-        soft_dropped = sum(
-            1 for j in dropped_jobs
-            if isinstance(j.task, AperiodicTask)
-        )
-
-        total_soft_miss = soft_missed_completed + soft_dropped
-
-        # Miss Rates
-        hard_miss_rate = (total_hard_miss / total_hard) if total_hard > 0 else 0.0
-        soft_miss_rate = (total_soft_miss / total_soft) if total_soft > 0 else 0.0
-
-
-        # 3. Response Time & Jitter
-        response_times = [j.finish_time - j.release_time for j in completed_jobs]
         avg_resp = statistics.mean(response_times) if response_times else 0
         max_resp = max(response_times) if response_times else 0
-        
-        # Jitter: Response Time 的標準差
         overall_jitter = statistics.pstdev(response_times) if len(response_times) > 1 else 0
 
-        # 4. Fairness (Jain's Fairness Index 概念，或使用 CPU time 標準差)
-        # 這裡計算 CPU share 的標準差，越低越公平
+        # -------------------------------------------------
+        # 6. CPU Utilization
+        # -------------------------------------------------
         total_busy = sum(j.task.exec_time for j in completed_jobs)
         cpu_util = (total_busy / sim_time) if sim_time else 0
-        
-        # 計算每個 Task 獲得的 CPU 時間
+
+        # -------------------------------------------------
+        # 7. Fairness（task-level）
+        # -------------------------------------------------
         task_cpu_map = {}
         for j in completed_jobs:
             task_cpu_map[j.task.name] = task_cpu_map.get(j.task.name, 0) + j.task.exec_time
-        
-        if task_cpu_map:
-            cpu_values = list(task_cpu_map.values())
-            # Fairness 簡單定義：1 - (CPU 分配的變異係數)
-            fairness = 1.0 - (statistics.pstdev(cpu_values) / statistics.mean(cpu_values)) if statistics.mean(cpu_values) > 0 else 0
+
+        if task_cpu_map and statistics.mean(task_cpu_map.values()) > 0:
+            fairness = 1.0 - (
+                statistics.pstdev(task_cpu_map.values())
+                / statistics.mean(task_cpu_map.values())
+            )
         else:
-            fairness = 0
+            fairness = 0.0
 
-        # 5. Dependency Deadlock Rate (檢查是否有 Job 因為相依性一直沒被執行)
-        # 簡單定義：如果 Dropped Job 中有是因為相依性卡住的
-        dep_deadlock = 0.0 # 實作複雜，暫時設 0，除非偵測到循環
-
-        # 6. Priority Starvation
-        # 檢查是否有高優先權任務一直搶佔低優先權
-        starvation_score = 0.0 # 暫留
-
+        # -------------------------------------------------
+        # 8. 回傳結果
+        # -------------------------------------------------
         return {
             "Algorithm": self.name,
-            "Drop Rate": f"{(dropped_count/total_released_count):.2%}" if total_released_count else "0%",
+            "Drop Rate": f"{(len(dropped_jobs)/total_released_count):.2%}" if total_released_count else "0%",
             "Hard Miss Rate": f"{hard_miss_rate:.2%}",
             "Soft Miss Rate": f"{soft_miss_rate:.2%}",
             "Avg Resp Time": f"{avg_resp:.2f}",
@@ -150,11 +138,12 @@ class BaseScheduler:
             "Overall Jitter": f"{overall_jitter:.3f}",
             "CPU Util": f"{cpu_util:.2%}",
             "Completed": len(completed_jobs),
-            "Dropped": dropped_count,
+            "Dropped": len(dropped_jobs),
             "Fairness": f"{fairness:.3f}",
-            "Dependency Deadlock": dep_deadlock,
-            "Priority-Starvation": f"{starvation_score:.3f}"
+            "Dependency Deadlock": 0.0,
+            "Priority-Starvation": "0.000"
         }
+
 
     def run(self, tasks, sim_time=100):
         current_time = 0
@@ -184,18 +173,27 @@ class BaseScheduler:
             # ---------------------------------------
             needs_reschedule = False
 
-            # Case 1: current job 完成
+            hard_arrived = any(j.task.is_hard for j in new_jobs)
+
+            # Case 1: current job finished or CPU idle
             if current_job is None or current_job.is_completed:
                 needs_reschedule = True
 
-            # Case 2: Preemptive + 新 job arrival
-            elif self.preemptive and new_jobs and current_job.preemptive:
-                # top = ready queue 中目前優先權最高的 job
-                top = self.pick_job(ready_queue, current_time)
-
-                if top and top is not current_job:
-                    # priority-driven preemption
+            else:
+                # Case 2: hard job arrived -> must preempt soft (hard overrides soft)
+                if hard_arrived and (not current_job.task.is_hard):
                     needs_reschedule = True
+
+                # Case 3: normal preemptive scheduling within same class (hard-hard or soft-soft)
+                elif self.preemptive and new_jobs:
+                    # 用 eligible 的 top 來比較，避免 dependency 未滿足的 job 造成誤判
+                    eligible_now = [j for j in ready_queue if self._eligible(j, completed_jobs)]
+                    top = self.pick_job(eligible_now, current_time) if eligible_now else None
+
+                    # 如果 top 不是 current_job 且 current_job 允許被搶佔 → 搶佔
+                    #（你也可以把 current_job.preemptive 的限制拿掉，讓 preemptive scheduler 一律可搶佔）
+                    if top and top is not current_job and getattr(current_job, "preemptive", True):
+                        needs_reschedule = True
 
 
             # ---------------------------------------
@@ -208,8 +206,21 @@ class BaseScheduler:
                     ready_queue.append(current_job)
 
                 # 選新 job
+                '''
                 eligible = [j for j in ready_queue if self._eligible(j, completed_jobs)]
                 new_job = self.pick_job(eligible, current_time) if eligible else None
+                '''
+                
+                hard_jobs = [j for j in ready_queue if j.task.is_hard and self._eligible(j, completed_jobs)]
+                soft_jobs = [j for j in ready_queue if not j.task.is_hard and self._eligible(j, completed_jobs)]
+
+                if hard_jobs:
+                    new_job = self.pick_job(hard_jobs, current_time)
+                elif soft_jobs:
+                    new_job = self.pick_job(soft_jobs, current_time)
+                else:
+                    new_job = None
+
 
                 if new_job:
                     current_job = new_job
@@ -244,14 +255,26 @@ class BaseScheduler:
         # ===================================================
         # 4. 模擬結束後，處理未完成但已釋放的 job → dropped job
         # ===================================================
-        completed_names = {j.name for j in completed_jobs}
-
+                    
+        completed_ids = {id(j) for j in completed_jobs}
         for job in all_released_jobs:
-            if job.name not in completed_names:
+            if id(job) not in completed_ids:
                 job.is_completed = False
                 job.finish_time = None
-                job.is_missed = True  # ✔ dropped = miss
-                dropped_jobs.append(job)
+                if job.absolute_deadline <= sim_time:
+                    job.is_missed = True
+                    dropped_jobs.append(job)
+              
+        '''      
+        print("released =", len(all_released_jobs))
+        print("completed =", len(completed_jobs))
+        print("dropped =", len(dropped_jobs))
+
+        if dropped_jobs:
+            j = dropped_jobs[0]
+            print("Dropped job:", j.name, "release=", j.release_time, "absD=", j.absolute_deadline,
+                "remaining=", j.remaining_time, "start=", j.start_time, "finish=", j.finish_time)
+        '''
 
         # ===================================================
         # 5. 回傳統計

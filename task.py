@@ -10,6 +10,7 @@ class Task:
         self.preemptive = preemptive
         self.priority = priority
         self.dependencies = dependencies if dependencies else []
+        self.is_hard = False
 
 class PeriodicTask(Task):
     def __init__(self, name, arrival, exec_time, period, deadline, 
@@ -18,6 +19,7 @@ class PeriodicTask(Task):
                          preemptive, priority, dependencies)
         self.period = period
         self.task_type = "Periodic"
+        self.is_hard = True
 
 class SporadicTask(Task):
     def __init__(self, name, arrival, exec_time, deadline, interval, 
@@ -26,6 +28,7 @@ class SporadicTask(Task):
                          preemptive, priority, dependencies)
         self.interval = interval
         self.task_type = "Sporadic"
+        self.is_hard = True
 
 class AperiodicTask(Task):
     def __init__(self, name, arrival, exec_time, deadline, 
@@ -33,6 +36,7 @@ class AperiodicTask(Task):
         super().__init__(name, arrival, exec_time, deadline, 
                          preemptive, priority, dependencies)
         self.task_type = "Aperiodic"
+        self.is_hard = False
 
 # ----------------------------------------------
 # Job: 實際被排程執行的物件

@@ -3,21 +3,21 @@ import random
 import math
 
 class TaskSetGenerator:
-    def __init__(self, use_preemption=False, use_priority=False, use_dependency=False, max_periodic_util=0.75, SEED=42):
+    def __init__(self, use_preemption=False, use_priority=False, use_dependency=False, max_periodic_util=0.7, SEED=42):
         self.use_preemption = use_preemption
         self.use_priority = use_priority
         self.use_dependency = use_dependency
         self.all_task_names = []
         self.max_periodic_util = max_periodic_util
-        random.seed(SEED)
+        # random.seed(SEED)
 
     def _add_optional_fields(self, all_task_names):
         preemptive = None
         priority = None
         dependencies = []
         if self.use_preemption:
-            # preemptive = random.choice([True, False])
-            preemptive = True
+            preemptive = random.choice([True, False])
+            # preemptive = True
         if self.use_priority:
             priority = random.randint(1, 10)
         if self.use_dependency and all_task_names and random.random() < 0.2:
@@ -36,10 +36,10 @@ class TaskSetGenerator:
                 name = f"p{i}"
                 self.all_task_names.append(name)
                 
-                # arrival = random.randint(0, 10)
-                arrival = 0
+                arrival = random.randint(0, 5)
+                # arrival = 0
                 
-                exec_time = random.randint(1, 5)
+                exec_time = random.randint(1, 3)
                 period = random.randint(max(10, exec_time+6), 25)
                 
                 deadline = random.randint(int(period*0.8), period)
@@ -47,7 +47,7 @@ class TaskSetGenerator:
                 # deadline = exec_time + 1
                 
                 preemptive, priority, dep = self._add_optional_fields(self.all_task_names[:-1])
-                t = PeriodicTask(name, arrival, exec_time, period, deadline, preemptive, priority, dep)
+                t = PeriodicTask(name, arrival, exec_time, period, deadline, True, priority, dep)
                 tasks.append(t)
             # ---------- Step 1: 利用率前置過濾 ----------
             util = sum(t.exec_time / t.period for t in tasks)
@@ -74,7 +74,7 @@ class TaskSetGenerator:
             arrival = random.randint(0, 50)
             # arrival = 5
             
-            exec_time = random.randint(1, 5)
+            exec_time = random.randint(1, 3)
             deadline = random.randint(exec_time + 5, 20)
             
             # 極端情況
@@ -92,7 +92,7 @@ class TaskSetGenerator:
             name = f"a{i}"
             self.all_task_names.append(name)
             arrival = random.randint(0, 50)
-            exec_time = random.randint(1, 5)
+            exec_time = random.randint(1, 3)
             deadline = random.randint(exec_time + 5, 30)
             preemptive, priority, dep = self._add_optional_fields(self.all_task_names[:-1])
             t = AperiodicTask(name, arrival, exec_time, deadline, preemptive, priority, dep)
