@@ -2,7 +2,7 @@
 
 class Task:
     def __init__(self, name, arrival, exec_time, deadline, 
-                 preemptive=False, priority=0, dependencies=None):
+                 preemptive=False, priority=float('inf'), dependencies=None):
         self.name = name
         self.arrival_time = arrival
         self.exec_time = exec_time
@@ -13,7 +13,7 @@ class Task:
 
 class PeriodicTask(Task):
     def __init__(self, name, arrival, exec_time, period, deadline, 
-                 preemptive=False, priority=0, dependencies=None):
+                 preemptive=False, priority=float('inf'), dependencies=None):
         super().__init__(name, arrival, exec_time, deadline, 
                          preemptive, priority, dependencies)
         self.period = period
@@ -21,7 +21,7 @@ class PeriodicTask(Task):
 
 class SporadicTask(Task):
     def __init__(self, name, arrival, exec_time, deadline, interval, 
-                 preemptive=False, priority=0, dependencies=None):
+                 preemptive=False, priority=float('inf'), dependencies=None):
         super().__init__(name, arrival, exec_time, deadline, 
                          preemptive, priority, dependencies)
         self.interval = interval
@@ -29,7 +29,7 @@ class SporadicTask(Task):
 
 class AperiodicTask(Task):
     def __init__(self, name, arrival, exec_time, deadline, 
-                 preemptive=False, priority=0, dependencies=None):
+                 preemptive=False, priority=float('inf'), dependencies=None):
         super().__init__(name, arrival, exec_time, deadline, 
                          preemptive, priority, dependencies)
         self.task_type = "Aperiodic"
@@ -38,12 +38,15 @@ class AperiodicTask(Task):
 # Job: 實際被排程執行的物件
 # ----------------------------------------------
 class Job:
-    def __init__(self, task, release_time, abs_deadline):
+    def __init__(self, task, release_time, abs_deadline, priority=float('inf'), preemptive=False):
         self.task = task
         self.name = f"{task.name}_{release_time}"
         self.release_time = release_time
         self.absolute_deadline = abs_deadline
         self.remaining_time = task.exec_time
+        self.run_time = 0
+        self.priority = priority
+        self.preemptive = preemptive
         
         # 統計數據
         self.start_time = -1

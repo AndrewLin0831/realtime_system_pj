@@ -52,47 +52,71 @@ def _print_compact_dict_of_lists(varname, d):
     print("}")
 
 def main():
-    gen = TaskSetGenerator(use_dependency=True, use_preemption=True, use_priority=True, max_periodic_util=0.75)
-    tasks = gen.generate_task_set(np=20, ns=30, na=6)
-
-    basic_task_set = tasks_to_basic_dict(tasks)
-    advanced_task_set = tasks_to_advanced_dict(tasks)
+    # setting
+    NP = 4
+    NS = 0
+    NA = 5
+    RANDOM_SEED = 42
+    
+    gen_basic = TaskSetGenerator(use_dependency=False, use_preemption=False, use_priority=False, max_periodic_util=0.75, SEED=RANDOM_SEED)
+    gen_advance = TaskSetGenerator(use_dependency=True, use_preemption=True, use_priority=True, max_periodic_util=0.75, SEED=RANDOM_SEED)
+    tasks_basic = gen_basic.generate_task_set(NP, NS, NA)
+    tasks_advance = gen_advance.generate_task_set(NP, NS, NA)
+    
+    basic_task_set = tasks_to_basic_dict(tasks_basic)
+    advanced_task_set = tasks_to_advanced_dict(tasks_advance)
 
     schedulers = [
         FIFOScheduler(), EDFScheduler(), RMScheduler(),
         LLFScheduler(), DMScheduler(), PriorityInheritanceScheduler(),
         SJFScheduler(), MyAlgoScheduler()
     ]
+    # schedulers = [EDFScheduler()]
 
     sim_time = 100
     scheduled_basic_tasks = {}
     scheduled_advanced_tasks = {}
 
+    print("----------- basic result -----------\n")
     for s in schedulers:
-        res = s.run(tasks, sim_time=sim_time)
-        names = timeline_names_from_result(res)
+        res_basic = s.run(tasks_basic, sim_time=sim_time)
+        names_basic = timeline_names_from_result(res_basic)
         key = s.name
         if key.lower().startswith("myalgo"):
             key = "myAlgo"
-        scheduled_basic_tasks[key] = names
-        scheduled_advanced_tasks[key] = names
+        scheduled_basic_tasks[key] = names_basic
         # 列印每個演算法 metrics（緊湊）
-        print(f"{key} Metrics: {json.dumps(res['metrics'], separators=(',',':'), ensure_ascii=False)}")
+        print(f"{key} Metrics: {json.dumps(res_basic['metrics'], separators=(',',':'), ensure_ascii=False)}\n\n")
+
+    print("----------- advance result -----------\n")
+    for s in schedulers:
+        res_advance = s.run(tasks_advance, sim_time)
+        names_advance = timeline_names_from_result(res_advance)
+        key = s.name
+        if key.lower().startswith("myalgo"):
+            key = "myAlgo"
+        scheduled_advanced_tasks[key] = names_advance
+        # 列印每個演算法 metrics（緊湊）
+        print(f"{key} Metrics: {json.dumps(res_advance['metrics'], separators=(',',':'), ensure_ascii=False)}\n")
 
     # 顯示 basic / advanced task set（漂亮縮排）
-    '''
     print("\nbasic_task_set =")
     print(json.dumps(basic_task_set, indent=4, ensure_ascii=False))
+    
+    
     print("\nadvanced_task_set =")
     print(json.dumps(advanced_task_set, indent=4, ensure_ascii=False))
-    '''
+    
 
     # 顯示 scheduled_*（keys 每行，lists 單行）
-    print("\nGenerated Scheduled Basic Tasks :\n")
+    print("\nGenerated Scheduled Basic Tasks :\n\n")
     _print_compact_dict_of_lists("scheduled_basic_tasks", scheduled_basic_tasks)
 
-    print("\nGenerated Scheduled Advanced Tasks :\n")
+    
+    print("\nGenerated Scheduled Advanced Tasks :\n\n")
     _print_compact_dict_of_lists("scheduled_advanced_tasks", scheduled_advanced_tasks)
+    
+
 
 if __name__ == "__main__":
     main()

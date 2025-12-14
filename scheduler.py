@@ -1,6 +1,7 @@
 # schedulers.py
 from task import *
 import statistics
+import math
 
 class BaseScheduler:
     def __init__(self):
@@ -25,7 +26,9 @@ class BaseScheduler:
             if should_release:
                 # 計算絕對截止時間
                 abs_deadline = time + task.deadline
-                new_jobs.append(Job(task, time, abs_deadline))
+                priority = task.priority if task.priority is not None else float('inf')
+                preemptive = task.preemptive
+                new_jobs.append(Job(task, time, abs_deadline, priority, preemptive))
         return new_jobs
 
     def _eligible(self, job, completed_jobs):
@@ -44,6 +47,17 @@ class BaseScheduler:
     def pick_job(self, queue, current_time):
         """子類別必須實作：從 Ready Queue 挑選一個 Job"""
         raise NotImplementedError("必須在子類別實作此方法")
+    
+    def is_hard(task):
+        """判定 deadline 屬性"""
+        return isinstance(task, (PeriodicTask, SporadicTask))
+    
+    def accept_job(self, job, ready_queue, current_job, time) -> bool:
+        """
+        檢查是否接受此 job（Hard Real-Time acceptance test）
+        回傳 True / False
+        """
+        raise NotImplementedError
 
     def evaluate(self, completed_jobs, total_released_count, sim_time, all_released_jobs):
         """計算詳細效能指標"""
@@ -146,8 +160,9 @@ class BaseScheduler:
         current_time = 0
         ready_queue = []
         completed_jobs = []
-        all_released_jobs = [] # 追蹤所有產生的 Job
-        
+        all_released_jobs = []
+        dropped_jobs = []
+
         current_job = None
         timeline = []
         released_flags = {}
@@ -155,60 +170,107 @@ class BaseScheduler:
         for t in range(sim_time):
             current_time = t
 
+            # ---------------------------------------
             # 1. 釋放新工作
+            # ---------------------------------------
             new_jobs = self._release_jobs(t, tasks, released_flags)
-            ready_queue.extend(new_jobs)
-            hard_new_arrived = any(getattr(j.task, "is_hard", False) for j in new_jobs)
-                
-            # 2. 處理 Preemption (搶佔)
-            needs_reschedule = (
-                self.preemptive or 
-                current_job is None or 
-                current_job.is_completed
-            )
 
+            if new_jobs:
+                ready_queue.extend(new_jobs)
+                all_released_jobs.extend(new_jobs)
+
+            # ---------------------------------------
+            # 2. Preemption or scheduling point
+            # ---------------------------------------
+            needs_reschedule = False
+
+            # Case 1: current job 完成
+            if current_job is None or current_job.is_completed:
+                needs_reschedule = True
+
+            # Case 2: Preemptive + 新 job arrival
+            elif self.preemptive and new_jobs and current_job.preemptive:
+                # top = ready queue 中目前優先權最高的 job
+                top = self.pick_job(ready_queue, current_time)
+
+                if top and top is not current_job:
+                    # priority-driven preemption
+                    needs_reschedule = True
+
+
+            # ---------------------------------------
+            # 進行重新排程（若需要）
+            # ---------------------------------------
             if needs_reschedule:
-                # 如果當前工作還沒做完就被搶佔，放回 Queue
+
+                # 先把 current_job 放回 ready queue（除非已完成）
                 if current_job and not current_job.is_completed:
                     ready_queue.append(current_job)
-                    current_job = None
-                
-                # 3. 篩選依賴滿足的 Jobs (Dependency Check)
-                eligible_jobs = [j for j in ready_queue if self._eligible(j, completed_jobs)]
-                
-                if eligible_jobs:
-                    # 4. 演算法挑選 Job
-                    picked = self.pick_job(eligible_jobs, current_time)
-                    if picked:
-                        current_job = picked
-                        # 從 ready_queue 移除 (注意：pick_job 回傳的是物件引用)
-                        if current_job in ready_queue:
-                            ready_queue.remove(current_job)
 
-            # 5. 執行
+                # 選新 job
+                eligible = [j for j in ready_queue if self._eligible(j, completed_jobs)]
+                new_job = self.pick_job(eligible, current_time) if eligible else None
+
+                if new_job:
+                    current_job = new_job
+                    ready_queue.remove(new_job)
+                else:
+                    current_job = None
+
+            # ---------------------------------------
+            # 3. 執行 current_job
+            # ---------------------------------------
             if current_job:
                 if current_job.start_time == -1:
                     current_job.start_time = t
+
                 current_job.remaining_time -= 1
+                current_job.run_time += 1  # 用來計算 CPU utilization
                 timeline.append((t, current_job.name))
 
+                # 任務完成
                 if current_job.remaining_time <= 0:
                     current_job.finish_time = t + 1
                     current_job.is_completed = True
-                    # 檢查是否 Miss
-                    if current_job.finish_time > current_job.absolute_deadline:
-                        current_job.is_missed = True
-                    
+                    current_job.is_missed = (current_job.finish_time > current_job.absolute_deadline)
+
                     completed_jobs.append(current_job)
                     current_job = None
+
             else:
+                # CPU idle
                 timeline.append((t, "IDLE"))
 
-        metrics = self.evaluate(completed_jobs, len(all_released_jobs), sim_time, all_released_jobs)
+        # ===================================================
+        # 4. 模擬結束後，處理未完成但已釋放的 job → dropped job
+        # ===================================================
+        completed_names = {j.name for j in completed_jobs}
+
+        for job in all_released_jobs:
+            if job.name not in completed_names:
+                job.is_completed = False
+                job.finish_time = None
+                job.is_missed = True  # ✔ dropped = miss
+                dropped_jobs.append(job)
+
+        # ===================================================
+        # 5. 回傳統計
+        # ===================================================
+        metrics = self.evaluate(
+            completed_jobs,
+            len(all_released_jobs),
+            sim_time,
+            all_released_jobs
+        )
+
         return {
             "timeline": timeline,
-            "metrics": metrics
+            "metrics": metrics,
+            "all_released_jobs": all_released_jobs,
+            "completed_jobs": completed_jobs,
+            "dropped_jobs": dropped_jobs
         }
+
 
 
 # ==========================================
@@ -224,7 +286,12 @@ class FIFOScheduler(BaseScheduler):
     def pick_job(self, queue, current_time):
         # 依照 Release Time 排序 (先來的先做)
         if not queue: return None
-        return sorted(queue, key=lambda j: j.release_time)[0]
+        return sorted(queue, key=lambda j: (j.release_time, j.priority))[0]
+    
+    def accept_job(self, job, ready_queue, current_job, time):
+        # FIFO 通常不能保證 hard-RT
+        # 最簡單版本：只檢查 job 自己能否趕上 deadline
+        return time + job.remaining_time <= job.absolute_deadline
 
 
 class EDFScheduler(BaseScheduler):
@@ -236,7 +303,16 @@ class EDFScheduler(BaseScheduler):
     def pick_job(self, queue, current_time):
         # 依照 Absolute Deadline 排序
         if not queue: return None
-        return sorted(queue, key=lambda j: j.absolute_deadline)[0]
+        return sorted(queue, key=lambda j: (j.absolute_deadline, j.priority))[0]
+    
+    def accept_job(self, job, ready_queue, current_job, time):
+        # EDF demand-based acceptance test:
+        # 所有 job 的需求不能大於時間窗長度
+
+        window = job.absolute_deadline - time
+        demand = job.remaining_time + sum(j.remaining_time for j in ready_queue)
+
+        return demand <= window
 
 
 class RMScheduler(BaseScheduler):
@@ -248,11 +324,46 @@ class RMScheduler(BaseScheduler):
     def pick_job(self, queue, current_time):
         # 依照 Period 排序 (週期越短，優先權越高)
         if not queue: return None
-        def get_period(job):
-            if isinstance(job.task, PeriodicTask):
-                return job.task.period
-            return 9999999 # 非週期任務優先權最低
-        return sorted(queue, key=get_period)[0]
+        def sort_key(job):
+            # 是否為 periodic（False < True）
+            is_aperiodic = not isinstance(job.task, PeriodicTask)
+
+            # Period（非週期任務給極大值）
+            period = job.task.period if not is_aperiodic else float('inf')
+
+            # Release time
+            release_time = job.release_time
+
+            # Priority（數字越小越高）
+            priority = job.priority
+
+            return (is_aperiodic, period, release_time, priority)
+
+        return min(queue, key=sort_key)
+    
+    def accept_job(self, job, ready_queue, current_job, time):
+
+        # 把所有 higher priority 的任務取出
+        hp_tasks = [j for j in ready_queue if j.task.period < job.task.period]
+
+        # 進行 Response Time Analysis
+        Ci = job.remaining_time
+        Di = job.task.deadline
+        Ri = Ci
+
+        while True:
+            interference = sum(
+                math.ceil(Ri / hp_j.task.period) * hp_j.task.exec_time
+                for hp_j in hp_tasks
+            )
+            new_Ri = Ci + interference
+            if new_Ri == Ri:
+                break
+            Ri = new_Ri
+            if Ri > Di:
+                return False
+        
+        return True
 
 
 class LLFScheduler(BaseScheduler):
@@ -265,7 +376,13 @@ class LLFScheduler(BaseScheduler):
         # Least Laxity First
         # Laxity = (AbsDeadline - CurrentTime) - RemainingTime
         if not queue: return None
-        return sorted(queue, key=lambda j: (j.absolute_deadline - current_time) - j.remaining_time)[0]
+        return sorted(queue, key=lambda j: (((j.absolute_deadline - current_time) - j.remaining_time) , j.priority))[0]
+    
+    def accept_job(self, job, ready_queue, current_job, time):
+        window = job.absolute_deadline - time
+        demand = job.remaining_time + sum(j.remaining_time for j in ready_queue)
+        return demand <= window
+
 
 
 class DMScheduler(BaseScheduler):
@@ -277,7 +394,31 @@ class DMScheduler(BaseScheduler):
     def pick_job(self, queue, current_time):
         # 依照 Relative Deadline 排序 (D 越短優先權越高)
         if not queue: return None
-        return sorted(queue, key=lambda j: j.task.deadline)[0]
+        return sorted(queue, key=lambda j: (j.task.deadline, j.priority))[0]
+    
+    def accept_job(self, job, ready_queue, current_job, time):
+
+        # 把所有 higher priority 的任務取出
+        hp_tasks = [j for j in ready_queue if j.task.deadline < job.task.deadline]
+
+        # 進行 Response Time Analysis
+        Ci = job.remaining_time
+        Di = job.task.deadline
+        Ri = Ci
+
+        while True:
+            interference = sum(
+                math.ceil(Ri / hp_j.task.period) * hp_j.task.exec_time
+                for hp_j in hp_tasks
+            )
+            new_Ri = Ci + interference
+            if new_Ri == Ri:
+                break
+            Ri = new_Ri
+            if Ri > Di:
+                return False
+        
+        return True
 
 
 class PriorityInheritanceScheduler(BaseScheduler):
@@ -290,7 +431,7 @@ class PriorityInheritanceScheduler(BaseScheduler):
         # 依照 Priority 排序 (數字越小優先權越高，假設 1 最高)
         if not queue: return None
         # 若 Priority 未定義，給予最大值 (最低優)
-        return sorted(queue, key=lambda j: getattr(j.task, 'priority', 9999))[0]
+        return sorted(queue, key=lambda j: j.priority)[0]
 
 
 # SJF as independent scheduler
@@ -303,7 +444,7 @@ class SJFScheduler(BaseScheduler):
     def pick_job(self, queue, current_time):
         # Shortest Job First: 剩餘執行時間最短的先做
         if not queue: return None
-        return sorted(queue, key=lambda j: j.remaining_time)[0]
+        return sorted(queue, key=lambda j: (j.remaining_time, j.priority))[0]
 
 
 # MyAlgo: example hybrid (deadline then short job)
@@ -316,4 +457,15 @@ class MyAlgoScheduler(BaseScheduler):
     def pick_job(self, queue, current_time):
         # primary: earliest absolute deadline, tie-break: smallest remaining time
         if not queue: return None
-        return sorted(queue, key=lambda j: (j.absolute_deadline, j.remaining_time))[0]
+        return sorted(queue, key=lambda j: (j.absolute_deadline, j.remaining_time, j.priority))[0]
+    
+    def accept_job(self, job, ready_queue, current_job, time):
+
+        # EDF demand-based acceptance test
+        window = job.absolute_deadline - time
+
+        # 所有 ready job 的剩餘執行時間 + 新 job 的執行時間
+        demand = job.remaining_time + sum(j.remaining_time for j in ready_queue)
+
+        return demand <= window
+    
