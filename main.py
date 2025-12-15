@@ -54,7 +54,7 @@ def _print_compact_dict_of_lists(varname, d):
 def main():
     # setting
     NP = 5
-    NS = 0
+    NS = 6
     NA = 6
     RANDOM_SEED = 42
     
@@ -109,7 +109,6 @@ def main():
     
 
     # 顯示 scheduled_*（keys 每行，lists 單行）
-    '''
     print("\nGenerated Scheduled Basic Tasks :\n\n")
     _print_compact_dict_of_lists("scheduled_basic_tasks", scheduled_basic_tasks)
 
@@ -117,7 +116,6 @@ def main():
     print("\nGenerated Scheduled Advanced Tasks :\n\n")
     _print_compact_dict_of_lists("scheduled_advanced_tasks", scheduled_advanced_tasks)
     
-    '''
 
 if __name__ == "__main__":
     main()

@@ -1,4 +1,5 @@
-from task import PeriodicTask, SporadicTask, AperiodicTask
+from task import PeriodicTask, SporadicTask, AperiodicTask, Job
+from EDFAcceptanceTest import EDFAcceptanceTest
 import random
 import math
 
@@ -82,7 +83,7 @@ class TaskSetGenerator:
             
             interval = random.randint(5, 12)
             preemptive, priority, dep = self._add_optional_fields(self.all_task_names[:-1])
-            t = SporadicTask(name, arrival, exec_time, deadline, interval, preemptive, priority, dep)
+            t = SporadicTask(name, arrival, exec_time, deadline, interval, True, priority, dep)
             tasks.append(t)
         return tasks
 
@@ -99,11 +100,35 @@ class TaskSetGenerator:
             tasks.append(t)
         return tasks
 
+
     def generate_task_set(self, np=3, ns=2, na=2):
         periodic = self.generate_periodic(np)
-        sporadic = self.generate_sporadic(ns)
         aperiodic = self.generate_aperiodic(na)
-        return periodic + sporadic + aperiodic
+
+        admission = EDFAcceptanceTest(periodic_tasks=periodic)
+        admitted_sporadic_tasks = []
+
+        while len(admitted_sporadic_tasks) < ns:
+            s = self.generate_sporadic(1)[0]
+
+            # 用「假 job」只做 admission test
+            fake_job = Job(
+                task=s,
+                release_time=s.arrival_time,
+                abs_deadline=s.arrival_time + s.deadline,
+            )
+
+            if admission.accept(
+                new_job=fake_job,
+                admitted_sporadic_jobs=[],
+                now=s.arrival_time
+            ):
+                admitted_sporadic_tasks.append(s)
+
+        return periodic + admitted_sporadic_tasks + aperiodic
+
+    
+    
     
     def check_schedulable_RM_RTA(self, tasks):
         """
@@ -141,6 +166,14 @@ class TaskSetGenerator:
 
         return True
 
+
+class FakeJob:
+    def __init__(self, exec_time, absolute_deadline, remaining_time):
+        self.exec_time = exec_time
+        self.absolute_deadline = absolute_deadline
+        self.remaining_time = remaining_time
+        self.is_completed = False
+    
 
 def check_schedulable_EDF_DBF(tasks, t_max=None):
     """

@@ -1,5 +1,6 @@
 # schedulers.py
 from task import *
+from EDFAcceptanceTest import EDFAcceptanceTest
 import statistics
 import math
 
@@ -82,8 +83,11 @@ class BaseScheduler:
         # -------------------------------------------------
         # 3. Hard Miss（唯一正確來源：j.is_missed）
         # -------------------------------------------------
-        hard_miss = sum(1 for j in hard_jobs if j.is_missed)
+        hard_miss = sum(1 for j in hard_jobs if (j.is_missed))
         hard_miss_rate = hard_miss / len(hard_jobs) if hard_jobs else 0.0
+        
+        hard_miss_jobs = [j.name for j in hard_jobs if j.is_missed]
+        print(f"[DEBUG] Hard Miss Job: {hard_miss_jobs}")
 
         # -------------------------------------------------
         # 4. Soft Miss（允許 miss，但仍統計）
@@ -155,6 +159,12 @@ class BaseScheduler:
         current_job = None
         timeline = []
         released_flags = {}
+        periodic_tasks = [t for t in tasks if isinstance(t, PeriodicTask)]
+        
+        self.admission = EDFAcceptanceTest(
+            periodic_tasks=periodic_tasks,
+            horizon_cap=sim_time
+        )
 
         for t in range(sim_time):
             current_time = t
@@ -164,9 +174,27 @@ class BaseScheduler:
             # ---------------------------------------
             new_jobs = self._release_jobs(t, tasks, released_flags)
 
-            if new_jobs:
-                ready_queue.extend(new_jobs)
-                all_released_jobs.extend(new_jobs)
+            # acceptive test
+            for j in new_jobs:
+                if j.task.is_hard and isinstance(j.task, SporadicTask):
+                    ok = self.admission.accept(
+                        new_job=j,
+                        admitted_sporadic_jobs=[x for x in ready_queue if isinstance(x.task, SporadicTask) and x.task.is_hard] + ([current_job] if current_job else []),
+                        now=t
+                    )
+                    if ok:
+                        ready_queue.append(j)
+                        all_released_jobs.append(j)
+                    else:
+                        # 拒絕：算 drop（hard drop）
+                        j.is_missed = True
+                        dropped_jobs.append(j)
+                        all_released_jobs.append(j)  # 仍記錄，用來計 drop rate
+                else:
+                    # periodic hard 一定收；aperiodic soft 直接收
+                    ready_queue.append(j)
+                    all_released_jobs.append(j)
+
 
             # ---------------------------------------
             # 2. Preemption or scheduling point
