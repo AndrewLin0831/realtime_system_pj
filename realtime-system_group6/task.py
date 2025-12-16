@@ -1,0 +1,65 @@
+# task.py
+
+class Task:
+    def __init__(self, name, arrival, exec_time, deadline, 
+                 preemptive=False, priority=float('inf'), dependencies=None):
+        self.name = name
+        self.arrival_time = arrival
+        self.exec_time = exec_time
+        self.deadline = deadline  # Relative Deadline
+        self.preemptive = preemptive
+        self.priority = priority
+        self.dependencies = dependencies if dependencies else []
+        self.is_hard = False
+
+class PeriodicTask(Task):
+    def __init__(self, name, arrival, exec_time, period, deadline, 
+                 preemptive=False, priority=float('inf'), dependencies=None):
+        super().__init__(name, arrival, exec_time, deadline, 
+                         preemptive, priority, dependencies)
+        self.period = period
+        self.task_type = "Periodic"
+        self.is_hard = True
+
+class SporadicTask(Task):
+    def __init__(self, name, arrival, exec_time, deadline, interval, 
+                 preemptive=False, priority=float('inf'), dependencies=None):
+        super().__init__(name, arrival, exec_time, deadline, 
+                         preemptive, priority, dependencies)
+        self.interval = interval
+        self.task_type = "Sporadic"
+        self.is_hard = True
+
+class AperiodicTask(Task):
+    def __init__(self, name, arrival, exec_time, deadline, 
+                 preemptive=False, priority=float('inf'), dependencies=None):
+        super().__init__(name, arrival, exec_time, deadline, 
+                         preemptive, priority, dependencies)
+        self.task_type = "Aperiodic"
+        self.is_hard = False
+
+# ----------------------------------------------
+# Job: 實際被排程執行的物件
+# ----------------------------------------------
+class Job:
+    def __init__(self, task, release_time, abs_deadline, priority=float('inf'), preemptive=False):
+        self.task = task
+        self.name = f"{task.name}_{release_time}"
+        self.release_time = release_time
+        self.absolute_deadline = abs_deadline
+        self.remaining_time = task.exec_time
+        self.run_time = 0
+        self.priority = priority
+        self.preemptive = preemptive
+        
+        # 統計數據
+        self.start_time = -1
+        self.finish_time = -1
+        self.is_completed = False
+        self.is_missed = False
+
+    @property
+    def laxity(self):
+        # Laxity = (Deadline - CurrentTime) - RemainingTime
+        # 注意：這裡需要在外部減去 current_time
+        return self.absolute_deadline - self.remaining_time

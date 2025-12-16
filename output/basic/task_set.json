@@ -1,0 +1,88 @@
+{
+    "periodic": {
+        "p1": {
+            "arrival_time": 0,
+            "period": 20,
+            "execution_time": 1,
+            "deadline": 18
+        },
+        "p2": {
+            "arrival_time": 0,
+            "period": 21,
+            "execution_time": 1,
+            "deadline": 21
+        },
+        "p3": {
+            "arrival_time": 0,
+            "period": 16,
+            "execution_time": 1,
+            "deadline": 14
+        },
+        "p4": {
+            "arrival_time": 0,
+            "period": 12,
+            "execution_time": 2,
+            "deadline": 11
+        },
+        "p5": {
+            "arrival_time": 0,
+            "period": 17,
+            "execution_time": 1,
+            "deadline": 17
+        }
+    },
+    "aperiodic": {
+        "a1": {
+            "arrival_time": 9,
+            "execution_time": 2,
+            "deadline": 16
+        },
+        "a2": {
+            "arrival_time": 17,
+            "execution_time": 3,
+            "deadline": 16
+        },
+        "a3": {
+            "arrival_time": 12,
+            "execution_time": 1,
+            "deadline": 24
+        },
+        "a4": {
+            "arrival_time": 31,
+            "execution_time": 1,
+            "deadline": 26
+        }
+    },
+    "sporadic": {
+        "s1": {
+            "arrival_time": 42,
+            "execution_time": 3,
+            "deadline": 19,
+            "min_interval": 12
+        },
+        "s2": {
+            "arrival_time": 5,
+            "execution_time": 3,
+            "deadline": 19,
+            "min_interval": 9
+        },
+        "s3": {
+            "arrival_time": 30,
+            "execution_time": 2,
+            "deadline": 25,
+            "min_interval": 9
+        },
+        "s4": {
+            "arrival_time": 14,
+            "execution_time": 2,
+            "deadline": 24,
+            "min_interval": 10
+        },
+        "s5": {
+            "arrival_time": 18,
+            "execution_time": 1,
+            "deadline": 25,
+            "min_interval": 6
+        }
+    }
+}
